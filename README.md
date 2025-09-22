@@ -1,4 +1,4 @@
-Navegação Reativa com TurtleBot3 (ROS 2 + Gazebo Classic)
+# Navegação Reativa com TurtleBot3 (ROS 2 + Gazebo Classic)
 
 Este projeto demonstra navegação reativa com o TurtleBot3 (modelo waffle) no Gazebo Classic, usando ROS 2 Humble. Implementa dois algoritmos clássicos:
 - Bug2: segue para o objetivo, contorna obstáculos e retorna à linha de início‑objetivo (M‑line) quando seguro e mais próximo do goal que no ponto de contato.
