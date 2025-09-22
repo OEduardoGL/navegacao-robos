@@ -25,7 +25,6 @@ Lançamentos
 
 Arquitetura
 ```
-.
 ├─ Dockerfile                  
 ├─ docker-compose.yml          
 ├─ entrypoint.sh               
