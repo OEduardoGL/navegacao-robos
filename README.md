@@ -16,10 +16,35 @@ Como rodar (Docker Compose)
 - Entre no container e rode:
   - `docker exec -it tb3_nav bash`
   - `source /opt/ros/humble/setup.bash`
-  - (opcional na primeira vez) `colcon build --packages-select tb3_bug_nav_classic --symlink-install`
+  - `colcon build --packages-select tb3_bug_nav_classic --symlink-install`
   - `source /root/ws/install/setup.bash`
 
 Lançamentos
-- Bug2 clássico: `ros2 launch tb3_bug_nav_classic bug2_classic.launch.py world:=/root/ws/src/tb3_bug_nav_classic/worlds/bug_world.world gui:=true`
+- Bug2: `ros2 launch tb3_bug_nav_classic bug2_classic.launch.py world:=/root/ws/src/tb3_bug_nav_classic/worlds/bug_world.world gui:=true`
 - Tangent‑Bug:   `ros2 launch tb3_bug_nav_classic tangent_classic.launch.py world:=/root/ws/src/tb3_bug_nav_classic/worlds/bug_world.world gui:=true`
 
+Arquitetura (escadinha)
+```
+.
+├─ Dockerfile                  
+├─ docker-compose.yml          
+├─ entrypoint.sh               
+├─ README.md                   
+└─ ws/
+   └─ src/
+      └─ tb3_bug_nav_classic/
+         ├─ package.xml        
+         ├─ setup.py           
+         ├─ setup.cfg          
+         ├─ resource/
+         │  └─ tb3_bug_nav_classic   
+         ├─ worlds/
+         │  └─ bug_world.world  # mundo Gazebo 
+         ├─ launch/
+         │  ├─ bug2_classic.launch.py     # Bug2 + Gazebo 
+         │  ├─ tangent_classic.launch.py  # TangentBug + Gazebo 
+         └─ tb3_bug_nav_classic/
+            ├─ __init__.py
+            ├─ utils.py           
+            ├─ bug2_node.py        # Bug2 (to-goal, follow-boundary, leave-to-goal)
+            └─ tangent_bug_node.py # TangentBug (to-goal, follow-boundary, leave-to-point)
