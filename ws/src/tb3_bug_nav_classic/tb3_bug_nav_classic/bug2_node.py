@@ -12,14 +12,22 @@ class Bug2(Node):
         super().__init__('bug2_node')
         self.declare_parameter('goal_x', 7.5)
         self.declare_parameter('goal_y', -8.5)
-        self.declare_parameter('v_lin', 0.26)
+        self.declare_parameter('v_lin', 0.35)
         self.declare_parameter('v_ang', 1.82)
-        self.declare_parameter('v_fb',  0.18)
+        self.declare_parameter('v_fb',  0.20)
         self.declare_parameter('v_min', 0.12)
+        # Smoothing and control tuning
+        self.declare_parameter('heading_kp', 1.2)
+        self.declare_parameter('heading_kd', 0.25)
+        self.declare_parameter('ang_filter_alpha', 0.35)  # 0..1 (higher = quicker)
+        self.declare_parameter('turn_speed_scale', 0.6)   # scale linear speed by heading error
         self.declare_parameter('obs_dist', 0.35)
         self.declare_parameter('clear_dist', 0.45)
         self.declare_parameter('follow_side', 'left')
         self.declare_parameter('follow_dist', 0.45)
+        self.declare_parameter('wall_kp', 2.0)            # proportional wall-follow gain
+        self.declare_parameter('wall_kd', 0.0)            # derivative term (optional)
+        self.declare_parameter('wall_band', 0.05)
         self.declare_parameter('obs_cone_deg', 50.0)
         self.declare_parameter('emergency_dist', 0.22)
         self.declare_parameter('mline_eps', 0.12)
@@ -34,6 +42,10 @@ class Bug2(Node):
         self.side = None
         self.loop_t0 = None
         self.leave_t0 = None
+        self.last_t = time.time()
+        self.err_hdg = 0.0
+        self.err_hdg_prev = 0.0
+        self.wall_err_prev = 0.0
 
         self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.create_subscription(LaserScan, '/scan', self.on_scan, qos_profile_sensor_data)
@@ -112,6 +124,7 @@ class Bug2(Node):
 
     def control(self):
         x,y,th = self.pose
+        now = time.time(); dt = max(1e-3, now - (self.last_t or now)); self.last_t = now
         if self.start is None:
             self.start = (x,y)
         gx = float(self.get_parameter('goal_x').value); gy = float(self.get_parameter('goal_y').value)
@@ -130,9 +143,21 @@ class Bug2(Node):
                 self.loop_t0 = time.time()
                 self.on_state('FOLLOW_BOUNDARY'); return
             hdg = heading_to(x,y,gx,gy)
-            err = (hdg - th + math.pi)%(2*math.pi) - math.pi
-            v = float(self.get_parameter('v_lin').value)
-            w = sat(1.2*err, float(self.get_parameter('v_ang').value))
+            # Heading control with low-pass + PD
+            err_raw = (hdg - th + math.pi)%(2*math.pi) - math.pi
+            alpha = float(self.get_parameter('ang_filter_alpha').value)
+            self.err_hdg = (1.0 - alpha)*self.err_hdg + alpha*err_raw
+            derr = (self.err_hdg - self.err_hdg_prev) / dt
+            self.err_hdg_prev = self.err_hdg
+            kp = float(self.get_parameter('heading_kp').value)
+            kd = float(self.get_parameter('heading_kd').value)
+            w = sat(kp*self.err_hdg + kd*derr, float(self.get_parameter('v_ang').value))
+            # Adaptive linear speed: slow down when turning
+            v_lin = float(self.get_parameter('v_lin').value)
+            v_min = float(self.get_parameter('v_min').value)
+            turn_scale = float(self.get_parameter('turn_speed_scale').value)
+            turn_factor = max(0.0, 1.0 - turn_scale*min(1.0, abs(self.err_hdg)/math.pi))
+            v = max(v_min, v_lin * turn_factor)
             self.on_cmd(v,w)
 
         elif self.state == 'FOLLOW_BOUNDARY':
@@ -144,17 +169,30 @@ class Bug2(Node):
             vfb    = float(self.get_parameter('v_fb').value)
             vmin   = float(self.get_parameter('v_min').value)
             if dfront < float(self.get_parameter('emergency_dist').value):
-                # Curved escape to avoid in-place spin loops
-                self.on_cmd(0.06, sat(1.0*sign,1.2)); return
-            band = 0.05
-            if dside > target + band:
-                w = sat(0.9*sign,1.2); v = vmin
-            elif dside < target - band:
-                w = sat(-0.9*sign,1.2); v = vmin
+                # Curved escape turning away from obstacle
+                self.on_cmd(0.04, sat(-1.0*sign, 1.2)); return
+            # Proportional (optionally PD) distance control to the wall
+            band = float(self.get_parameter('wall_band').value)
+            # error positive if too far from the wall
+            e = (dside - target)
+            kp_w = float(self.get_parameter('wall_kp').value)
+            kd_w = float(self.get_parameter('wall_kd').value)
+            de = (e - self.wall_err_prev) / dt
+            self.wall_err_prev = e
+            w_cmd = kp_w*e + kd_w*de
+            # apply side sign and saturation (left-follow: too far -> turn left)
+            w = sat(sign*w_cmd, 1.2)
+            # speed policy: slow down if correcting strongly and if front is approaching
+            corr = min(1.0, abs(w)/1.2)
+            # scale by front clearance between emergency..clear
+            emer = float(self.get_parameter('emergency_dist').value)
+            clr  = float(self.get_parameter('clear_dist').value)
+            if clr <= emer:
+                front_scale = 0.5
             else:
-                # Straight-ish segment: go a bit faster if front is clear
-                v_boost = 0.22 if (dfront > target + 0.2) else vfb
-                w = 0.0; v = max(v_boost, vmin)
+                front_scale = max(0.2, min(1.0, (dfront - emer)/(clr - emer)))
+            v_base = vfb if abs(e) > 2.0*band else (0.22 if (dfront > target + 0.25) else vfb)
+            v = max(vmin, v_base * (1.0 - 0.5*corr) * front_scale)
             self.on_cmd(v,w)
 
             # Bug2 leave condition: on M-line and closer to goal than at hit point
@@ -172,8 +210,15 @@ class Bug2(Node):
             hdg = heading_to(x,y,gx,gy)
             err = (hdg - th + math.pi)%(2*math.pi) - math.pi
             forward_clear = self.cone_min_at(0.0, 20.0)
+            # Reuse filtered heading for smoother exit turn
+            alpha = float(self.get_parameter('ang_filter_alpha').value)
+            self.err_hdg = (1.0 - alpha)*self.err_hdg + alpha*err
+            derr = (self.err_hdg - self.err_hdg_prev) / dt
+            self.err_hdg_prev = self.err_hdg
+            kp = float(self.get_parameter('heading_kp').value)
+            kd = float(self.get_parameter('heading_kd').value)
+            w = sat(kp*self.err_hdg + kd*derr, float(self.get_parameter('v_ang').value))
             v = 0.18 if forward_clear > float(self.get_parameter('clear_dist').value) else 0.10
-            w = sat(1.2*err, float(self.get_parameter('v_ang').value))
             self.on_cmd(v, w)
             # After short cooldown and alignment, go to MOTION_TO_GOAL
             if (time.time() - (self.leave_t0 or time.time())) > 0.8 and abs(err) < 0.5 and forward_clear > float(self.get_parameter('obs_dist').value):

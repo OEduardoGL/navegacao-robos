@@ -1,21 +1,25 @@
-Classic ROS2 + Gazebo (Classic) TurtleBot3 Bug Navigation
+Navegação Reativa com TurtleBot3 (ROS 2 + Gazebo Classic)
 
-This is a clean, self‑contained setup using ROS 2 Humble + Gazebo Classic inside Docker. It runs TurtleBot3 (waffle) with working LIDAR and two algorithms: Bug1 and TangentBug. A custom world with 3 obstacles (one concave) is included.
+Este projeto demonstra navegação reativa com o TurtleBot3 (modelo waffle) no Gazebo Classic, usando ROS 2 Humble. Implementa dois algoritmos clássicos:
+- Bug2: segue para o objetivo, contorna obstáculos e retorna à linha de início‑objetivo (M‑line) quando seguro e mais próximo do goal que no ponto de contato.
+- TangentBug: seleciona candidatos por bordas da leitura do laser e decide o melhor avanço com base em um custo heurístico.
 
-Quick start (Docker Compose)
-- Requirements: Docker + Docker Compose + host X11 enabled (Linux)
-- One‑time: `xhost +local:`
-- Launch (builds automatically):
-  - `cd classic_nav`
-  - `docker compose up --build`
+O mundo `bug_world.world` contém obstáculos estáticos e dois “spots” de luz que definem início e objetivo:
+- START: `user_spot_light_0`
+- GOAL:  `user_spot_light_1`
 
-In the container (new shell opens)
-- Bug1: `ros2 launch tb3_bug_nav_classic bug1_classic.launch.py`
-- Tangent-Bug: `ros2 launch tb3_bug_nav_classic tangent_classic.launch.py`
+Como rodar (Docker Compose)
+- Requisitos: Docker + Docker Compose, X11 habilitado no host Linux.
+- No host: `xhost +local:`
+- Suba o ambiente:
+  - `docker-compose up -d --build`
+- Entre no container e rode:
+  - `docker exec -it tb3_nav bash`
+  - `source /opt/ros/humble/setup.bash`
+  - (opcional na primeira vez) `colcon build --packages-select tb3_bug_nav_classic --symlink-install`
+  - `source /root/ws/install/setup.bash`
 
-Record rosbag
-- `ros2 bag record -o bug_run /odom /scan /cmd_vel /bug_state`
+Lançamentos
+- Bug2 clássico: `ros2 launch tb3_bug_nav_classic bug2_classic.launch.py world:=/root/ws/src/tb3_bug_nav_classic/worlds/bug_world.world gui:=true`
+- Tangent‑Bug:   `ros2 launch tb3_bug_nav_classic tangent_classic.launch.py world:=/root/ws/src/tb3_bug_nav_classic/worlds/bug_world.world gui:=true`
 
-Files
-- docker-compose.yml, Dockerfile, entrypoint.sh
-- Workspace: `ws/src/tb3_bug_nav_classic` (code + launch + world)

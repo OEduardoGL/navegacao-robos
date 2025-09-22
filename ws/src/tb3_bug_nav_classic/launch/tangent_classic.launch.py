@@ -58,7 +58,11 @@ def generate_launch_description():
                 'goal_y': gy,
             }]
         )
-        return [spawn, node]
+        echo_state = ExecuteProcess(
+            cmd=['ros2','topic','echo','/bug_state'],
+            output='screen'
+        )
+        return [spawn, node, echo_state]
 
     return LaunchDescription([
         DeclareLaunchArgument('world', default_value=world_default),

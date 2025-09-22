@@ -3,11 +3,15 @@ services:
     build: .
     image: tb3_classic_nav:latest
     container_name: tb3_nav
+    shm_size: "2gb"
     environment:
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
       - TURTLEBOT3_MODEL=waffle
-      - LIBGL_DRI3_DISABLE=1
+      - LIBGL_DRI3_DISABLE=0   # tente 0 se seu driver suportar bem DRI3
+      - MESA_NO_ERROR=1        # menos validação GL, mais fps
+      # - vblank_mode=0          # desativa vsync
+      - MESA_LOADER_DRIVER_OVERRIDE=iris
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${HOME}/.Xauthority:/root/.Xauthority:ro
