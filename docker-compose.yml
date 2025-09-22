@@ -8,19 +8,17 @@ services:
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
       - TURTLEBOT3_MODEL=waffle
-      - LIBGL_DRI3_DISABLE=0   # tente 0 se seu driver suportar bem DRI3
-      - MESA_NO_ERROR=1        # menos validação GL, mais fps
+      - LIBGL_DRI3_DISABLE=0   
+      - MESA_NO_ERROR=1       
       # - vblank_mode=0          # desativa vsync
       - MESA_LOADER_DRIVER_OVERRIDE=iris
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${HOME}/.Xauthority:/root/.Xauthority:ro
-      # Persist your worlds folder between host and container
       - ./ws/src/tb3_bug_nav_classic/worlds:/root/ws/src/tb3_bug_nav_classic/worlds:rw
     devices:
       - /dev/dri:/dev/dri
     stdin_open: true
     tty: true
-    # expose Gazebo master for running gzclient on host if needed
     ports:
       - "11345:11345"
