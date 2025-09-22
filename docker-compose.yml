@@ -1,0 +1,22 @@
+services:
+  tb3_nav:
+    build: .
+    image: tb3_classic_nav:latest
+    container_name: tb3_nav
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - TURTLEBOT3_MODEL=waffle
+      - LIBGL_DRI3_DISABLE=1
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${HOME}/.Xauthority:/root/.Xauthority:ro
+      # Persist your worlds folder between host and container
+      - ./ws/src/tb3_bug_nav_classic/worlds:/root/ws/src/tb3_bug_nav_classic/worlds:rw
+    devices:
+      - /dev/dri:/dev/dri
+    stdin_open: true
+    tty: true
+    # expose Gazebo master for running gzclient on host if needed
+    ports:
+      - "11345:11345"
