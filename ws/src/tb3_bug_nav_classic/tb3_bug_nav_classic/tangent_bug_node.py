@@ -9,40 +9,30 @@ from .utils import dist, heading_to, sat
 
 
 class TangentBug(Node):
-    """
-    Classic TangentBug (functional minimal):
-      - MOTION_TO_GOAL: go straight to goal if LoS clear
-      - FOLLOW_BOUNDARY: wall-follow around obstacle keeping safe clearance
-        and leave when LoS to goal opens again.
-    """
 
     def __init__(self):
         super().__init__('tangent_bug_node')
 
-        # goal & speeds
         self.declare_parameter('goal_x', 7.5)
         self.declare_parameter('goal_y', -8.5)
-        self.declare_parameter('v_lin', 0.26)
+        self.declare_parameter('v_lin', 0.33)
         self.declare_parameter('v_follow', 0.14)
         self.declare_parameter('v_min', 0.10)
-        self.declare_parameter('v_ang', 1.6)
+        self.declare_parameter('v_ang', 1.5)
 
-        # sensing & safety
         self.declare_parameter('obs_dist', 0.35)
         self.declare_parameter('clear_dist', 0.50)
-        self.declare_parameter('emergency_dist', 0.22)
+        self.declare_parameter('emergency_dist', 0.26)
         self.declare_parameter('obs_cone_deg', 50.0)
-        self.declare_parameter('goal_cone_deg', 6.0)
+        self.declare_parameter('goal_cone_deg', 12.0)
         self.declare_parameter('edge_thresh', 0.25)
         self.declare_parameter('avoid_cone_deg', 24.0)
         self.declare_parameter('k_avoid', 0.9)
-        # (kept for compatibility, not required in minimal TB)
 
-        # control smoothing
-        self.declare_parameter('heading_kp', 1.05)
-        self.declare_parameter('heading_kd', 0.25)
-        self.declare_parameter('ang_filter_alpha', 0.4)
-        self.declare_parameter('k_wall', 1.6)
+        self.declare_parameter('heading_kp', 0.95)
+        self.declare_parameter('heading_kd', 0.32)
+        self.declare_parameter('ang_filter_alpha', 0.33)
+        self.declare_parameter('k_wall', 1.3)
 
         # runtime state
         self.pose = (0.0, 0.0, 0.0)
@@ -53,6 +43,7 @@ class TangentBug(Node):
         self.leave_pt = None
         self.leave_t0 = 0.0
         self.err_hdg = 0.0; self.err_hdg_prev = 0.0; self.last_t = time.time()
+        self.dbg_tlast = 0.0
 
         # ROS I/O
         self.create_subscription(Odometry, '/odom', self.on_odom, 10)
@@ -81,8 +72,8 @@ class TangentBug(Node):
 
     def on_scan(self, msg: LaserScan):
         self.scan = list(msg.ranges); self.ang0 = msg.angle_min; self.dang = msg.angle_increment
+        self.range_max = getattr(msg, 'range_max', 10.0)
 
-    # --- Perception utilities ---
     def cone_min_at(self, center_ang: float, deg: float) -> float:
         if self.scan is None: return 10.0
         cone = math.radians(deg)
@@ -107,17 +98,27 @@ class TangentBug(Node):
                 if math.isfinite(r) and r>0.0: vals.append(r)
         return min(vals) if vals else 10.0
 
+    def scan_at(self, ang: float) -> float:
+        if self.scan is None: return 10.0
+        i = int((ang - self.ang0)/self.dang); n = len(self.scan)
+        vals=[]
+        for k in range(i-1, i+2):
+            if 0<=k<n:
+                r = self.scan[k]
+                if math.isfinite(r) and r>0.0: vals.append(r)
+        return min(vals) if vals else 10.0
+
     def goal_visible(self, th: float, gx: float, gy: float) -> bool:
-        # Consider LoS if there is no obstacle within a small cone around goal bearing
-        # closer than a conservative clear distance. This avoids dependence on lidar max range.
+        # LoS: alcance na direção do goal deve ser >= distância até o goal
         x,y,_ = self.pose
+        dgoal = dist(x,y,gx,gy)
         hdg   = heading_to(x,y,gx,gy)
         err   = (hdg - th + math.pi)%(2*math.pi) - math.pi
         r     = self.cone_min_at(err, float(self.get_parameter('goal_cone_deg').value))
-        return r > float(self.get_parameter('clear_dist').value) + 0.05
+        return r >= dgoal - 0.10
 
     def pick_follow_side(self):
-        # choose the side with closer wall so we keep it on that side
+        # escolha o lado com a parede mais próxima para que fique desse lado
         left = self.scan_at(+math.radians(60.0))
         right= self.scan_at(-math.radians(60.0))
         return 'left' if left < right else 'right'
@@ -130,7 +131,7 @@ class TangentBug(Node):
         off = math.radians(12.0)
         step_max = 0.6
         n=len(self.scan); cand=[]
-        # edges-based
+        
         for i in range(1,n-1):
             r=self.scan[i]; r0=self.scan[i-1]; r1=self.scan[i+1]
             if not (r and r>0.0 and math.isfinite(r) and math.isfinite(r0) and math.isfinite(r1)): continue
@@ -148,7 +149,7 @@ class TangentBug(Node):
                     px=x + d_step*math.cos(th+ang); py=y + d_step*math.sin(th+ang)
                     h=dist(x,y,px,py) + dist(px,py,gx,gy)
                     cand.append((h, px, py, ang))
-        # around goal bearing
+        
         hdg=heading_to(x,y,gx,gy); err=(hdg-th+math.pi)%(2*math.pi)-math.pi
         for offg in (-0.35,-0.2,0.2,0.35):
             ang=err+offg; r=self.ray_range(ang)
@@ -188,7 +189,7 @@ class TangentBug(Node):
                     px=x + d_step*math.cos(th+ang); py=y + d_step*math.sin(th+ang)
                     h=dist(x,y,px,py)+dist(px,py,gx,gy)
                     cand.append((h,px,py))
-        # around goal bearing
+        
         hdg=heading_to(x,y,gx,gy); err=(hdg-th+math.pi)%(2*math.pi)-math.pi
         for offg in (-0.35,-0.2,0.2,0.35):
             ang=err+offg; r=self.ray_range(ang)
@@ -204,7 +205,6 @@ class TangentBug(Node):
         cand.sort(key=lambda t:t[0])
         return (cand[0][1], cand[0][2])
 
-    # --- Main control ---
     def control(self):
         x,y,th = self.pose
         gx=float(self.get_parameter('goal_x').value); gy=float(self.get_parameter('goal_y').value)
@@ -215,6 +215,11 @@ class TangentBug(Node):
             self.on_state('ARRIVED'); self.on_cmd(0.0,0.0); return
 
         dfront=self.cone_min(float(self.get_parameter('obs_cone_deg').value))
+        # apenas debug
+        hdg_dbg=heading_to(x,y,gx,gy)
+        err_goal=(hdg_dbg-th+math.pi)%(2*math.pi)-math.pi
+        r_goal=self.cone_min_at(err_goal, float(self.get_parameter('goal_cone_deg').value))
+        los=self.goal_visible(th,gx,gy)
         vmin=float(self.get_parameter('v_min').value)
         wmax=float(self.get_parameter('v_ang').value)
         kp=float(self.get_parameter('heading_kp').value)
@@ -223,11 +228,18 @@ class TangentBug(Node):
         emer=float(self.get_parameter('emergency_dist').value)
         clear=float(self.get_parameter('clear_dist').value)
 
+        # apenas debug
+        if (now - self.dbg_tlast) > 0.3:
+            self.get_logger().info(
+                f"DBG state={self.state} dfront={dfront:.2f} clear={clear:.2f} emer={emer:.2f} "
+                f"dgoal={dgoal:.2f} r_goal={r_goal:.2f} los={los} side={self.follow_side}")
+            self.dbg_tlast = now
+        # avança diretamente ao goal quando há linha‑de‑visada (LoS)
         if self.state=='MOTION_TO_GOAL':
-            if (not self.goal_visible(th,gx,gy)) or dfront < float(self.get_parameter('obs_dist').value):
+            if dfront < float(self.get_parameter('obs_dist').value):
                 self.follow_side = self.pick_follow_side()
                 self.on_state('FOLLOW_BOUNDARY'); return
-            # PD to goal
+            
             hdg=heading_to(x,y,gx,gy)
             err=(hdg-th+math.pi)%(2*math.pi)-math.pi
             self.err_hdg=(1.0-alpha)*self.err_hdg + alpha*err
@@ -238,14 +250,12 @@ class TangentBug(Node):
             v = min(v, max(0.08, 0.6*(self.cone_min_at(0.0,15.0) - emer)))
             self.on_cmd(v,w)
             return
-
+        # contorna mantendo o obstáculo de um lado, com folga estável, até surgir uma rota segura (goal visível ou tangente boa)
         if self.state=='FOLLOW_BOUNDARY':
-            # Wall-follow with frontal avoidance bias
             sign = +1.0 if self.follow_side=='left' else -1.0
             dside = self.scan_at(sign*math.radians(60.0))
             e_side = (dside - clear)
             k_wall=float(self.get_parameter('k_wall').value)
-            # Frontal left/right clearance to steer away from the nearer side
             avoid_deg=float(self.get_parameter('avoid_cone_deg').value)
             left_c  = self.cone_min_at(+0.35, avoid_deg)
             right_c = self.cone_min_at(-0.35, avoid_deg)
@@ -256,39 +266,39 @@ class TangentBug(Node):
             w = sat(sign*(k_wall*e_side) + w_avoid, 1.2)
             v_follow=float(self.get_parameter('v_follow').value)
             v = max(vmin, v_follow*(1.0-0.4*min(1.0,abs(w)/1.2)))
-            v = min(v, max(0.04, 0.8*(dfront - emer)))
+            v = min(v, max(0.05, 0.8*(dfront - emer)))
+            if (now - self.dbg_tlast) > 0.3:
+                self.get_logger().info(
+                    f"DBG FB: dside={dside:.2f} e_side={e_side:.2f} left_c={left_c:.2f} right_c={right_c:.2f} "
+                    f"w_avoid={w_avoid:.2f} w={w:.2f} v={v:.2f}")
             if dfront < emer + 0.02:
                 self.on_cmd(0.0, sat(-sign*0.9,1.2)); return
             self.on_cmd(v,w)
 
-            # Leave when LoS to goal is open and front is clear enough
-            if self.goal_visible(x,y,th,gx,gy) and dfront > clear + 0.03:
+            if self.goal_visible(th,gx,gy) and dfront > clear + 0.03:
                 self.on_state('MOTION_TO_GOAL'); return
 
-            # Try a safe tangent leave if a good candidate exists
             cand = self.tangent_candidates(x,y,th,gx,gy)
             if cand:
                 h, px, py, ang = cand[0]
-                # only leave if the bearing is roughly forward (within ±90°) and LoS to point good
                 if -math.pi/2 < ang < math.pi/2 and self.cone_min_at(ang, 10.0) > dist(x,y,px,py) - 0.05:
                     self.leave_pt=(px,py); self.leave_t0=now
                     self.on_state('LEAVE_TO_POINT'); return
-
+        # desloca até um ponto tangente visível e seguro que “salte” o obstáculo
         if self.state=='LEAVE_TO_POINT':
             if self.leave_pt is None:
                 self.on_state('FOLLOW_BOUNDARY'); return
             px,py=self.leave_pt
-            # If LoS to goal opens, go to goal
-            if self.goal_visible(x,y,th,gx,gy) and dfront > clear + 0.02:
+            if self.goal_visible(th,gx,gy) and dfront > clear + 0.02:
                 self.leave_pt=None
                 self.on_state('MOTION_TO_GOAL'); return
-            # If blocked toward point, revert to boundary
+
             ang=math.atan2(py - y, px - x) - th
             ang=(ang+math.pi)%(2*math.pi)-math.pi
             if self.cone_min_at(ang, 10.0) < emer + 0.03:
                 self.leave_pt=None
                 self.on_state('FOLLOW_BOUNDARY'); return
-            # PD to point
+
             self.err_hdg=(1.0-alpha)*self.err_hdg + alpha*ang
             derr=(self.err_hdg - self.err_hdg_prev)/dt; self.err_hdg_prev=self.err_hdg
             w=sat(kp*self.err_hdg + kd*derr, wmax)
@@ -296,10 +306,10 @@ class TangentBug(Node):
             v = max(vmin, v_follow*(1.0-0.5*min(1.0,abs(w)/wmax)))
             v = min(v, max(0.06, 0.6*(self.cone_min_at(0.0,15.0)-emer)))
             self.on_cmd(v,w)
-            # Terminate near point or if taking too long
+
             if dist(x,y,px,py) < 0.35 or (now - self.leave_t0) > 2.5:
                 self.leave_pt=None
-                if self.goal_visible(x,y,th,gx,gy) and dfront > clear:
+                if self.goal_visible(th,gx,gy) and dfront > clear:
                     self.on_state('MOTION_TO_GOAL')
                 else:
                     self.on_state('FOLLOW_BOUNDARY')

@@ -16,7 +16,6 @@ def generate_launch_description():
     gui = LaunchConfiguration('gui')
 
     def setup_spawn_and_node(context):
-        # Defaults (from this world): START at user_spot_light_0, GOAL at user_spot_light_1
         sx, sy, gx, gy = 6.27553, -8.98436, -8.65364, 8.61971
         try:
             world_path = world.perform(context)
@@ -24,7 +23,6 @@ def generate_launch_description():
                 txt = f.read()
             def find_pose(light_name):
                 import re
-                # Match both single and double quotes around the name attribute
                 pattern = rf"<light[^>]*name=['\"]{light_name}['\"][^>]*>[\s\S]*?<pose>([^<]+)</pose>"
                 m = re.search(pattern, txt)
                 if m:
