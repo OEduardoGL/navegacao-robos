@@ -23,7 +23,7 @@ Lançamentos
 - Bug2: `ros2 launch tb3_bug_nav_classic bug2_classic.launch.py world:=/root/ws/src/tb3_bug_nav_classic/worlds/bug_world.world gui:=true`
 - Tangent‑Bug:   `ros2 launch tb3_bug_nav_classic tangent_classic.launch.py world:=/root/ws/src/tb3_bug_nav_classic/worlds/bug_world.world gui:=true`
 
-Arquitetura (escadinha)
+Arquitetura
 ```
 .
 ├─ Dockerfile                  
